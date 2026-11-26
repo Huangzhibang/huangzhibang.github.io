@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>运动健康协作平台 · 入口</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    background:radial-gradient(1200px 600px at 15% -10%,#d9f2ea 0%,transparent 60%),
+               radial-gradient(900px 500px at 100% 0%,#e6eefc 0%,transparent 55%),#f6faf9;
+    color:#0f2f2a}
+  .wrap{width:100%;max-width:640px}
+  .card{background:#fff;border:1px solid #e3efeb;border-radius:24px;padding:40px 36px;
+    box-shadow:0 24px 60px -28px rgba(15,157,118,.35),0 2px 8px rgba(15,47,42,.04)}
+  .badge{display:inline-flex;align-items:center;gap:8px;font-size:12px;font-weight:600;
+    color:#0b7d5e;background:#e8f7f2;border:1px solid #cdeee2;border-radius:999px;padding:5px 12px}
+  .dot{width:6px;height:6px;border-radius:50%;background:#0f9d76;box-shadow:0 0 0 3px rgba(15,157,118,.15)}
+  h1{font-size:30px;line-height:1.3;letter-spacing:-.4px;margin:18px 0 10px}
+  .sub{font-size:14px;line-height:1.75;color:#4b6b64}
+  .feats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:22px 0 26px}
+  .feat{background:#f7fbfa;border:1px solid #e8f2ef;border-radius:12px;padding:12px 10px;text-align:center}
+  .feat b{display:block;font-size:12px;color:#0b7d5e;margin-bottom:4px}
+  .feat span{font-size:11px;color:#7b938d;line-height:1.5}
+  .btns{display:flex;gap:10px;flex-wrap:wrap}
+  .btn{flex:1;min-width:180px;display:inline-flex;align-items:center;justify-content:center;gap:8px;
+    padding:14px 18px;border-radius:12px;font-size:14px;font-weight:600;text-decoration:none;
+    transition:transform .15s,box-shadow .15s,border-color .15s}
+  .btn-main{background:linear-gradient(135deg,#12b184,#0b7d5e);color:#fff;
+    box-shadow:0 10px 24px -10px rgba(15,157,118,.8)}
+  .btn-main:hover{transform:translateY(-1px);box-shadow:0 14px 30px -10px rgba(15,157,118,.9)}
+  .btn-ghost{background:#fff;color:#0f2f2a;border:1px solid #e0ece8}
+  .btn-ghost:hover{border-color:#0f9d76;color:#0b7d5e}
+  .note{margin-top:22px;padding:14px 16px;background:#fdf8ec;border:1px solid #f3e5c4;
+    border-radius:12px;font-size:12px;line-height:1.75;color:#8a6a24}
+  .note b{color:#6b5018}
+  .foot{margin-top:18px;text-align:center;font-size:11px;color:#93a9a4}
+  a{color:#0b7d5e}
+  @media(max-width:520px){.card{padding:28px 22px}h1{font-size:24px}.feats{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <span class="badge"><span class="dot"></span>AI 便携运动健康监测 · 现代农业与大健康</span>
+    <h1>运动健康协作平台</h1>
+    <p class="sub">
+      上传运动视频，云端 AI 自动完成视频审批、动作记录与规范性评分，
+      输出疲劳趋势、节奏评估与辅助建议。含场景方案库、技术架构、数据报告与小宝 AI 助手。
+    </p>
+    <div class="feats">
+      <div class="feat"><b>自动审批</b><span>可解码性核验</span></div>
+      <div class="feat"><b>动作记录</b><span>关键帧逐条标注</span></div>
+      <div class="feat"><b>确定性评分</b><span>可复算可追溯</span></div>
+    </div>
+    <div class="btns">
+      <a class="btn btn-main" id="enter" href="https://sport-health-monitor.app.workbuddy.host/?sharecode=PFQ6KTYYLV">进入平台 →</a>
+      <a class="btn btn-ghost" href="./app.html">查看源码</a>
+    </div>
+    <div class="note">
+      <b>说明：</b>这里是 GitHub Pages 静态入口，仅作展示与源码备份。平台的云端数据库与账号登录只对正式发布域名开放，
+      在 <code>github.io</code> 下直接打开会因跨域限制读不到数据，请点击「进入平台」使用正式地址。
+    </div>
+    <div class="foot">本系统仅提供运动参考，不构成医疗诊断</div>
+  </div>
+</div>
+<script>
+  // 2 秒后自动进入正式平台，点按或滚动可取消
+  var t = setTimeout(function () { location.href = document.getElementById('enter').href; }, 2600);
+  ['click','keydown','wheel','touchstart'].forEach(function (e) {
+    window.addEventListener(e, function () { clearTimeout(t); }, { once: true, passive: true });
+  });
+</script>
+</body>
+</html>
