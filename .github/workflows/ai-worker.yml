@@ -4,6 +4,12 @@ on:
   schedule:
     # 每 5 分钟推进一次（GitHub 定时任务最小粒度，实际可能延迟数分钟）
     - cron: "*/5 * * * *"
+  push:
+    # 推送脚本自身的改动时立即跑一次，便于验证与首次激活
+    branches: [main]
+    paths:
+      - "ai-worker/**"
+      - ".github/workflows/ai-worker.yml"
   workflow_dispatch:
 
 permissions:

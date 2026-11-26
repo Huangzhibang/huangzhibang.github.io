@@ -1,0 +1,52 @@
+name: ai-pipeline-worker
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-pipeline-worker
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: advance cloud tasks
+        run: |
+          python3 - <<'PY'
+          import json, urllib.request
+
+          ENDPOINT = "https://sport-health-monitor.app.workbuddy.host"
+          KEY = "wbpk_eRW5YZcLuWnFOWcWtaQ0dz_jMDNlkkCMBBBQDtfXGhPvf6eq1s1DiU5"
+          REST = ENDPOINT + "/.cloud/database/rest"
+
+          def call(method, path, payload=None):
+              data = json.dumps(payload).encode() if payload is not None else None
+              req = urllib.request.Request(REST + path, data=data, method=method)
+              req.add_header("x-wb-webapp-access-key", KEY)
+              req.add_header("Origin", ENDPOINT)
+              req.add_header("Content-Type", "application/json")
+              with urllib.request.urlopen(req, timeout=30) as r:
+                  body = r.read().decode()
+                  return json.loads(body) if body else None
+
+          rows = call("GET", "/wf_tasks?select=id,status&status=in.(pending_approval,pending_record,pending_analysis)&order=created.asc&limit=20") or []
+          moved = 0
+          for row in rows:
+              for _ in range(3):
+                  res = call("POST", "/rpc/wb_ai_advance", {"p_id": row["id"]})
+                  step = (res or {}).get("step")
+                  if not step or step == "none":
+                      break
+                  moved += 1
+                  print(row["id"], step, (res or {}).get("status"))
+                  if (res or {}).get("status") in ("done", "rejected"):
+                      break
+          print("moved", moved)
+          PY
