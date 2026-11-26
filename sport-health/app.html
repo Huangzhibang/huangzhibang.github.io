@@ -1268,9 +1268,10 @@ function setRole(r,init){
   if(typeof updateScenePerm==='function')updateScenePerm();
   if(typeof renderIdentityUi==='function')renderIdentityUi();
 }
-function statusName(s){return {pending_approval:'待审批',pending_record:'待记录',pending_analysis:'待分析',done:'已完成',rejected:'已驳回'}[s]||s}
-function roleOf(t){return {pending_approval:'AI 审批员',pending_record:'AI 记录员',pending_analysis:'AI 分析员',done:'已归档',rejected:'AI 审批员（已驳回）'}[t.status]||'—'}
+function statusName(s){return {local_parse:'本机解析中',pending_approval:'待审批',pending_record:'待记录',pending_analysis:'待分析',done:'已完成',rejected:'已驳回'}[s]||s}
+function roleOf(t){return {local_parse:'本机解析',pending_approval:'AI 审批员',pending_record:'AI 记录员',pending_analysis:'AI 分析员',done:'已归档',rejected:'AI 审批员（已驳回）'}[t.status]||'—'}
 function stageHtml(t){
+  if(t.status==='local_parse')return '<span class="stage on">视频解析中…</span>';
   var order=['pending_approval','pending_record','pending_analysis','done'],labels=['待审批','待记录','待分析','已完成'],idx=order.indexOf(t.status);
   if(t.status==='rejected')return '<span class="stage rej">✕ 已驳回</span>';
   return labels.map(function(l,i){
@@ -1292,42 +1293,73 @@ function videoHtml(t,id){
 function renderAll(){renderPipeline();renderApprover();renderRecorder();renderAnalyst();renderAssessResult();refreshAiBanner()}
 
 /* ============ 视频真实分析 ============ */
+/* 原则：本机解析成功才提交云端。
+   编码不支持 / 文件损坏 / 加载超时 → 本地终止，不产生云端任务，
+   客户看到的是明确的「请转 MP4 重试」，而不是被 AI 驳回。 */
 function createTaskFromFile(file){
   if(!canUpload())return null;
+  if(file.size>300*1024*1024){toast('视频 '+Math.round(file.size/1048576)+'MB 超过 300MB 上限，请压缩或裁剪后再上传');return null}
+  if(/\.(mov|hevc|mkv|avi)$/i.test(file.name||'')){
+    toast('检测到 '+file.name.split('.').pop().toUpperCase()+' 格式：iPhone 默认 HEVC 编码，浏览器可能无法解析。若本次失败，请在手机「设置→相机→格式」选「兼容性最佳」重拍，或导出 MP4/H.264 后上传');
+  }
   var id='V-'+new Date().getTime().toString().slice(-6);
   var t={id:id,name:file.name,size:file.size,created:new Date().toLocaleString('zh-CN'),uploader:(authUser&&authUser.id)||'guest',
-    status:'pending_approval',meta:null,frames:[],motion:null,approval:null,records:[],analysis:null};
+    status:'local_parse',meta:null,frames:[],motion:null,approval:null,records:[],analysis:null,local:true};
   tasks.unshift(t);lastTaskId=id;renderAll();
-  upsertTask(t).then(function(ok){
-    if(!ok){toast('任务提交失败，请检查网络后重试');return}
-    toast('任务 '+id+' 已提交，正在解析视频…');
-    analyzeVideo(file,t);      // 解析完成后再触发 AI，避免空帧被误判驳回
-  });
+  analyzeVideo(file,t);
   return t;
 }
 function analyzeVideo(file,t){
   var url=URL.createObjectURL(file);urls[t.id]=url;
-  var v=document.createElement('video');v.preload='auto';v.muted=true;v.src=url;
+  var v=document.createElement('video');
+  v.preload='auto';v.muted=true;v.playsInline=true;
+  v.setAttribute('playsinline','');v.setAttribute('webkit-playsinline','');
+  v.src=url;
+  var settled=false;
+  function abort(msg){
+    if(settled)return;settled=true;
+    t.status='aborted';
+    clearTimeout(metaTimer);
+    try{URL.revokeObjectURL(url)}catch(e){}
+    delete urls[t.id];
+    tasks=tasks.filter(function(x){return x.id!==t.id});
+    renderAll();
+    toast(msg);
+  }
+  function commit(){
+    if(settled)return;settled=true;
+    t.status='pending_approval';t.local=false;
+    renderAll();
+    upsertTask(t).then(function(ok){
+      if(!ok){abort('网络中断，视频未提交成功，请重新上传');return}
+      toast('解析完成（'+t.frames.length+' 帧）· 已提交云端 AI 审批与评分');
+      setTimeout(function(){runAIEngine()},300);
+    });
+  }
+  var metaTimer=setTimeout(function(){
+    abort('视频加载超时（15 秒）。可能是不受支持的编码，请用手机相机直接拍摄，或导出 MP4/H.264 后重试');
+  },15000);
   v.onloadedmetadata=function(){
-    var dur=isFinite(v.duration)&&v.duration>0?v.duration:10;
+    clearTimeout(metaTimer);
+    var dur=isFinite(v.duration)&&v.duration>0?v.duration:0;
+    if(!dur){abort('无法读取视频时长，文件可能不完整。请换一个 MP4 视频重试');return}
     t.meta={dur:dur,w:v.videoWidth||0,h:v.videoHeight||0};
-    sampleFrames(v,t);
+    sampleFrames(v,t,commit,abort);
   };
   v.onerror=function(){
-    t.meta={dur:0,w:0,h:0};t.frames=[];t.motion={samples:[],avg:0,error:true};
-    patchTask(t.id,{meta:t.meta,frames:t.frames,motion:t.motion}).then(function(){setTimeout(function(){runAIEngine()},300)});
-    renderAll();
-    toast('浏览器无法解码该视频，云端 AI 将自动驳回（建议转 MP4/H.264 重新上传）');
+    abort('浏览器无法解码该视频（MOV/HEVC 常见）。请用手机相机直接拍摄，或用剪辑软件导出 MP4/H.264 后重试');
   };
 }
-function sampleFrames(v,t){
+function sampleFrames(v,t,onDone,onFail){
   var n=6,times=[],dur=t.meta.dur;
   for(var i=0;i<n;i++)times.push(dur*(i+0.5)/n);
   var small=document.createElement('canvas');small.width=32;small.height=24;
   var sc=small.getContext('2d',{willReadFrequently:true});
   var big=document.createElement('canvas'),bc=big.getContext('2d');
-  var grays=[],thumbs=[],idx=0,fallback=null;
+  var grays=[],thumbs=[],idx=0,fallback=null,failed=0,ended=false;
   function finish(){
+    if(ended)return;ended=true;clearTimeout(fallback);
+    if(!thumbs.length||!grays.length){onFail('无法从视频中提取画面（编码不受支持）。请导出 MP4/H.264 后重试');return}
     var motions=[];
     for(var j=1;j<grays.length;j++){
       var s=0;for(var k=0;k<grays[j].length;k++)s+=Math.abs(grays[j][k]-grays[j-1][k]);
@@ -1335,15 +1367,11 @@ function sampleFrames(v,t){
     }
     var avg=motions.length?motions.reduce(function(a,b){return a+b},0)/motions.length:0;
     t.motion={samples:motions,avg:+avg.toFixed(1)};t.frames=thumbs;
-    patchTask(t.id,{meta:t.meta,frames:t.frames,motion:t.motion}).then(function(ok){
-      if(ok)setTimeout(function(){runAIEngine()},300);   // 上传完成后立即触发云端 AI
-    });
-    renderAll();
-    toast('视频分析完成：提取 '+thumbs.length+' 帧 · 平均运动量 '+avg.toFixed(1)+'，已触发云端 AI');
+    onDone();
   }
   function capture(){
     clearTimeout(fallback);
-    if(grays.length>idx)return;
+    if(ended)return;
     try{
       sc.drawImage(v,0,0,32,24);
       var d=sc.getImageData(0,0,32,24).data,gray=[];
@@ -1352,15 +1380,16 @@ function sampleFrames(v,t){
       var ratio=(t.meta.h&&t.meta.w)?t.meta.h/t.meta.w:0.6;
       big.width=180;big.height=Math.max(60,Math.round(180*ratio));
       bc.drawImage(v,0,0,big.width,big.height);
-      thumbs.push({t:+times[idx].toFixed(2),data:big.toDataURL('image/jpeg',0.55)});
-    }catch(e){grays.push(new Array(32*24).fill(0))}
+      thumbs.push({t:+times[Math.min(idx,times.length-1)].toFixed(2),data:big.toDataURL('image/jpeg',0.55)});
+    }catch(e){failed++}
     idx++;next();
   }
   function next(){
-    if(idx>=times.length){finish();return}
+    if(ended)return;
+    if(idx>=times.length||failed>=4){finish();return}
     clearTimeout(fallback);
     try{v.currentTime=times[idx]}catch(e){}
-    fallback=setTimeout(capture,1200);
+    fallback=setTimeout(capture,3000);   // seek 卡住也抓当前画面，避免整段失败
   }
   v.onseeked=capture;
   next();
@@ -1368,13 +1397,30 @@ function sampleFrames(v,t){
 function onFile(e){
   var f=e.target.files&&e.target.files[0];if(!f)return;
   document.getElementById('upTitle').textContent='已选择：'+f.name;
-  document.getElementById('upSub').textContent='大小 '+fmtBytes(f.size)+' · 正在本地提取关键帧…';
+  document.getElementById('upSub').textContent='大小 '+fmtBytes(f.size)+' · 正在本机提取关键帧…';
   var bar=document.getElementById('progBar'),txt=document.getElementById('progTxt');
   document.getElementById('progWrap').classList.add('show');
-  var p=0;var timer=setInterval(function(){p=Math.min(96,p+9);bar.style.width=p+'%';txt.textContent='正在解析 '+f.name+' …'},180);
-  setTimeout(function(){clearInterval(timer);bar.style.width='100%';txt.textContent='已提交协作流水线，等待审批员处理'},1300);
+  bar.style.width='6%';
   var t=createTaskFromFile(f);
-  document.getElementById('lastTaskTip').textContent='任务 '+t.id+' 已提交审批';
+  if(!t){
+    document.getElementById('progWrap').classList.remove('show');
+    document.getElementById('upSub').textContent='未能开始解析，请更换视频后重试';
+    e.target.value='';return;
+  }
+  var p=6;
+  var timer=setInterval(function(){
+    p=Math.min(92,p+7);bar.style.width=p+'%';
+    if(t.status==='local_parse'){txt.textContent='正在解析 '+f.name+'（请保持页面打开）';return}
+    clearInterval(timer);bar.style.width='100%';
+    if(t.status==='pending_approval'){
+      txt.textContent='解析完成，已提交云端 AI 审批与评分';
+      document.getElementById('lastTaskTip').textContent='任务 '+t.id+' 已提交，云端 AI 将自动处理';
+    }else{
+      txt.textContent='解析未完成，本次视频未提交';
+      document.getElementById('lastTaskTip').textContent='请按提示转换格式后重新上传';
+    }
+    setTimeout(function(){document.getElementById('progWrap').classList.remove('show')},1400);
+  },200);
   setTimeout(function(){go('pipeline')},900);
   e.target.value='';
 }
@@ -1398,10 +1444,10 @@ function renderPipeline(){
       return '<tr>'+
         '<td style="font-family:Consolas,monospace;font-size:12px">'+t.id+'</td>'+
         '<td>'+esc(t.name)+'</td>'+
-        '<td style="font-size:12px">'+esc(t.created)+'<br><span style="font-size:11px;color:var(--faint)">'+(t.meta?fmtTime(t.meta.dur)+(t.motion&&t.motion.avg!=null?' · 运动量 '+t.motion.avg:' · 解析中'):'解析失败')+'</span></td>'+
+        '<td style="font-size:12px">'+esc(t.created)+'<br><span style="font-size:11px;color:var(--faint)">'+(t.status==='local_parse'?'本机解析中…':(t.meta?fmtTime(t.meta.dur)+(t.motion&&t.motion.avg!=null?' · 运动量 '+t.motion.avg:''):'未完成解析'))+'</span></td>'+
         '<td>'+stageHtml(t)+'</td>'+
         '<td style="font-size:12.5px">'+roleOf(t)+'</td>'+
-        '<td><span class="viewlnk" onclick="openDetail(\''+t.id+'\')">详情</span>'+(link==='detail'?'':' · '+oper)+'</td>'+
+        '<td><span class="viewlnk" onclick="openDetail(\''+t.id+'\')">详情</span>'+(t.status==='rejected'?' · <span class="viewlnk" onclick="go(\'assess\')">重新上传</span>':(link==='detail'?'':' · '+oper))+'</td>'+
       '</tr>';
     }).join('')+'</tbody></table>';
 }
@@ -1607,6 +1653,7 @@ function openDetail(id){
     '<div class="sec-title">① 审批员审批</div><div class="meta">'+(t.approval?(esc(t.approval.by)+' · '+esc(t.approval.time)+' · '+((t.approval.result==='pass')?'<span style="color:var(--primary)">通过</span>':'<span style="color:var(--red)">驳回：'+esc(t.approval.reason)+'</span>')):'尚未审批')+'</div>'+
     '<div class="sec-title">② 视频记录员记录</div>'+(recs?'<div class="reclist" style="border-top:none">'+recs+'</div>':'<div class="meta">暂无记录</div>')+
     '<div class="sec-title">③ 动作记录分析员分析</div>'+(t.analysis?'<div class="meta">规范性得分 <b style="color:var(--primary-d);font-size:15px">'+t.analysis.score+'</b> · 疲劳趋势 '+esc(t.analysis.fatigue)+' · 节奏 '+esc(t.analysis.rhythm)+'</div><div class="advice" style="margin-top:8px">'+esc(t.analysis.advice)+'<br><span style="font-size:11px">本结果仅供运动参考，不构成医疗诊断。</span></div>':'<div class="meta">尚未分析</div>')+
+    (t.status==='rejected'?'<div style="margin-top:16px"><button class="minibtn pri" onclick="closeDetail();go(\'assess\')">重新上传视频</button> <span class="meta" style="margin-left:8px">建议先转成 MP4/H.264</span></div>':'')+
     '</div>';
   document.getElementById('detailBox').innerHTML=h;
   document.getElementById('detailMask').classList.add('show');
