@@ -1096,22 +1096,27 @@ var CLOUD_CFG={
 var cloud=(typeof WorkBuddyCloud!=='undefined')?WorkBuddyCloud.createWorkBuddyCloud(CLOUD_CFG):null;
 /* ============ 发布地址与预览环境识别 ============ */
 var PUBLISHED_URL='https://sport-health-monitor.app.workbuddy.host/?sharecode=PFQ6KTYYLV';
-function isPreviewHost(){
+function isLocalHost(){
   var h=location.hostname||'';
   if(location.protocol==='file:')return true;
   if(!h||h==='localhost'||h==='127.0.0.1'||h==='0.0.0.0')return true;
   if(/^192\.168\./.test(h)||/^10\./.test(h)||/^172\.(1[6-9]|2\d|3[01])\./.test(h))return true;
-  return !/\.workbuddy\.host$/i.test(h);
+  return false;
+}
+function isPreviewHost(){
+  return isLocalHost() || !/\.workbuddy\.host$/i.test(location.hostname||'');
 }
 var IS_PREVIEW=isPreviewHost();
-/* 本地预览提示条：登录/云同步必须在发布地址进行 */
+/* 非发布域名提示条：云端接口按 Origin 白名单校验，外部域名一律被拒 */
 function showPreviewHint(){
   if(!IS_PREVIEW)return;
   if(document.getElementById('previewBar'))return;
+  var local=isLocalHost();
   var bar=document.createElement('div');
   bar.id='previewBar';
   bar.style.cssText='position:fixed;left:0;right:0;top:0;z-index:99999;display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap;padding:9px 16px;background:#fff7e6;border-bottom:1px solid #f0d9a8;color:#8a5a00;font-size:13px;line-height:1.5;font-family:inherit';
-  bar.innerHTML='<b style="font-weight:600">本地预览模式</b><span>预览地址不支持账号登录，登录 / 云同步 / 多人协作请用发布地址</span>'+
+  bar.innerHTML='<b style="font-weight:600">'+(local?'本地预览模式':'当前域名未授权')+'</b>'+
+    '<span>'+(local?'预览地址不支持账号登录，登录 / 云同步 / 多人协作请用发布地址':'云端接口只允许发布域名访问，当前域名会被跨域拦截（403），数据与登录均不可用')+'</span>'+
     '<button type="button" onclick="window.open(PUBLISHED_URL,\'_blank\')" style="border:0;border-radius:6px;background:#0f9d76;color:#fff;font-size:12px;padding:5px 12px;cursor:pointer">打开发布地址</button>'+
     '<button type="button" onclick="copyPublished()" style="border:1px solid #e0c894;border-radius:6px;background:#fff;color:#8a5a00;font-size:12px;padding:5px 12px;cursor:pointer">复制链接</button>'+
     '<button type="button" aria-label="关闭" onclick="this.parentNode.style.display=\'none\'" style="border:0;background:transparent;color:#a88a55;font-size:16px;cursor:pointer;padding:0 4px">×</button>';
@@ -1129,7 +1134,7 @@ function copyPublished(){
 function needPublished(){
   if(!IS_PREVIEW)return false;
   showPreviewHint();
-  toast('本地预览不支持登录，请用发布地址打开后再登录');
+  toast(isLocalHost()?'本地预览不支持登录，请用发布地址打开后再登录':'当前域名未授权，云端拒绝访问，请用发布地址');
   return true;
 }
 /* ============ 登录与授权状态 ============ */
@@ -1858,7 +1863,12 @@ function applyPoll(){
 function markPreviewUI(){
   if(!IS_PREVIEW)return;
   var hint=document.getElementById('loginHostHint');
-  if(hint){hint.style.display='';var a=document.getElementById('loginPublishedLink');if(a)a.href=PUBLISHED_URL}
+  if(hint){
+    hint.style.display='';
+    var tx=document.getElementById('loginHostText');
+    if(tx)tx.textContent=isLocalHost()?'当前为本地预览地址，登录会被平台拦截。':'当前域名未授权，云端接口拒绝该来源（403），登录与数据均不可用。';
+    var a=document.getElementById('loginPublishedLink');if(a)a.href=PUBLISHED_URL;
+  }
 }
 function openSettings(tab){
   document.getElementById('setMask').classList.add('show');
@@ -2695,7 +2705,7 @@ function initReport(){initReportOptions();renderReport()}
           <h3>登录方式</h3>
           <p class="desc">选择一种方式登录。登录后还需在“账号信息”中将当前账号设为本人，才拥有修改权限。</p>
           <div class="hint" id="loginHostHint" style="display:none;background:#fff7e6;border:1px solid #f0d9a8;color:#8a5a00;border-radius:8px;padding:10px 12px;margin-bottom:12px">
-            当前为本地预览地址，登录会被平台拦截。请改用发布地址登录：
+            <span id="loginHostText">当前为本地预览地址，登录会被平台拦截。</span>请改用发布地址登录：
             <a href="#" id="loginPublishedLink" style="color:#0b7d5e;font-weight:600;text-decoration:underline" target="_blank" rel="noopener">打开发布地址</a>
             <button class="minibtn" style="margin-left:8px" onclick="copyPublished()">复制链接</button>
           </div>
