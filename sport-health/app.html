@@ -1215,10 +1215,20 @@ function rowToTask(r){return {id:r.id,name:r.name,size:r.size||0,created:r.creat
 function taskToRow(t){return {id:t.id,name:t.name,size:t.size||0,created:t.created||'',status:t.status,meta:t.meta||null,frames:t.frames||[],motion:t.motion||null,approval:t.approval||null,records:t.records||[],record_submit:t.record_submit||null,analysis:t.analysis||null,updated_at:new Date().toISOString()}}
 function taskSig(){return JSON.stringify(tasks.map(function(t){return t.id+'|'+t.status+'|'+(t.records||[]).length+'|'+(t.analysis?t.analysis.score:'')+'|'+(t.frames||[]).length}))}
 function setCloudStat(ok){var el=document.getElementById('cloudStat');if(!el)return;el.textContent=ok?'☁ 云端已连接':'⚠ 云端连接失败';el.classList.toggle('err',!ok)}
+var _cloudRetryAt=0;
 async function loadTasks(silent){
   if(!cloud){setCloudStat(false);if(!silent)toast('云端 SDK 未加载，请检查网络后刷新');return false}
   var res=await cloud.database.from('wf_tasks').select('*').order('updated_at',{ascending:false});
-  if(res.error){cloudErr=res.error.message||'云端读取失败';setCloudStat(false);if(!silent)toast('云端读取失败：'+cloudErr);return false}
+  if(res.error){
+    cloudErr=res.error.message||'云端读取失败';
+    // 首屏数据多或网络抖动时容易超时：先静默重试一次，避免误报“连接失败”
+    if(Date.now()-_cloudRetryAt>6000){
+      _cloudRetryAt=Date.now();
+      setTimeout(function(){loadTasks(true)},1600);
+      return false;
+    }
+    setCloudStat(false);if(!silent)toast('云端读取失败：'+cloudErr);return false;
+  }
   var before=taskSig();
   tasks=(res.data||[]).map(rowToTask);
   setCloudStat(true);
