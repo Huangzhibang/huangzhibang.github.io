@@ -1,0 +1,29 @@
+name: ai-pipeline-worker
+
+on:
+  schedule:
+    # 每 5 分钟推进一次（GitHub 定时任务最小粒度，实际可能延迟数分钟）
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-pipeline-worker
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: 推进云端待处理任务
+        env:
+          AI_WORKER_ONCE: "1"
+          AI_WORKER_POLL: "20"
+        run: python ai-worker/ai_pipeline_worker.py
